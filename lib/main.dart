@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'ludo_board.dart';
+import 'dice_widget.dart';
 
 void main() {
   runApp(const LudoMaster());
@@ -31,7 +32,11 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.casino, size: 80, color: Color(0xFFD4AF37)),
+            const Icon(
+              Icons.casino,
+              size: 80,
+              color: Color(0xFFD4AF37),
+            ),
             const SizedBox(height: 20),
             const Text(
               'LUDO MASTER',
@@ -67,11 +72,25 @@ class GameScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF080D18),
-      appBar: AppBar(title: const Text('LUDO MASTER')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: const LudoBoard(),
+      appBar: AppBar(
+        title: const Text('LUDO MASTER'),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: const LudoBoard(),
+                ),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.only(bottom: 25),
+              child: DiceWidget(),
+            ),
+          ],
         ),
       ),
     );

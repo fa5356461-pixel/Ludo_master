@@ -34,3 +34,4 @@ jobs:
         with:
           name: LUDO-MASTER-APK
           path: build/app/outputs/flutter-apk/app-release.apk
+          

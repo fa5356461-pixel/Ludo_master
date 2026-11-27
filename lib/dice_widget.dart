@@ -2,13 +2,19 @@
 import 'package:flutter/material.dart';
 
 class DiceWidget extends StatefulWidget {
-  final int Function() onRoll;
+  final String playerName;
+  final Color color;
+  final int value;
   final bool enabled;
+  final int Function() onRoll;
 
   const DiceWidget({
     super.key,
+    required this.playerName,
+    required this.color,
+    required this.value,
+    required this.enabled,
     required this.onRoll,
-    this.enabled = true,
   });
 
   @override
@@ -16,9 +22,8 @@ class DiceWidget extends StatefulWidget {
 }
 
 class _DiceWidgetState extends State<DiceWidget> {
-  int diceNumber = 1;
-  int rollCount = 0;
   bool isRolling = false;
+  int rollCount = 0;
 
   Future<void> rollDice() async {
     if (isRolling || !widget.enabled) return;
@@ -28,84 +33,107 @@ class _DiceWidgetState extends State<DiceWidget> {
       rollCount++;
     });
 
-    await Future.delayed(const Duration(milliseconds: 750));
+    await Future.delayed(const Duration(milliseconds: 550));
 
     if (!mounted) return;
 
-    final result = widget.onRoll();
+    widget.onRoll();
+
+    if (!mounted) return;
 
     setState(() {
-      diceNumber = result;
       isRolling = false;
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        AnimatedRotation(
-          turns: rollCount * 1.5,
-          duration: const Duration(milliseconds: 750),
-          curve: Curves.easeOutCubic,
-          child: AnimatedScale(
-            scale: isRolling ? 1.12 : 1.0,
-            duration: const Duration(milliseconds: 250),
-            child: Container(
-              width: 96,
-              height: 96,
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: const Color(0xFFD4AF37),
-                borderRadius: BorderRadius.circular(22),
-                boxShadow: [
-                  BoxShadow(
-                    color: const Color(0xFFD4AF37).withOpacity(0.35),
-                    blurRadius: 22,
-                    spreadRadius: 2,
-                  ),
-                ],
-              ),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFFDF7),
-                  borderRadius: BorderRadius.circular(17),
-                ),
-                child: CustomPaint(
-                  painter: _DiceFacePainter(diceNumber),
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            ),
+    final active = widget.enabled;
+
+    return GestureDetector(
+      onTap: active ? rollDice : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        margin: const EdgeInsets.symmetric(horizontal: 3),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 2),
+        decoration: BoxDecoration(
+          color: active
+              ? widget.color.withOpacity(0.17)
+              : const Color(0xFF182235),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: active ? widget.color : Colors.white12,
+            width: active ? 2 : 1,
           ),
         ),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: 180,
-          height: 48,
-          child: ElevatedButton.icon(
-            onPressed:
-                (isRolling || !widget.enabled) ? null : rollDice,
-            icon: const Icon(Icons.casino),
-            label: Text(
-              isRolling ? 'ROLLING...' : 'ROLL DICE',
-              style: const TextStyle(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.playerName.toUpperCase(),
+              maxLines: 1,
+              style: TextStyle(
+                color: active ? widget.color : Colors.white54,
+                fontSize: 10,
                 fontWeight: FontWeight.bold,
-                letterSpacing: 1.2,
               ),
             ),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFD4AF37),
-              foregroundColor: const Color(0xFF080D18),
-              disabledBackgroundColor: Colors.grey,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+            const SizedBox(height: 7),
+            AnimatedRotation(
+              turns: isRolling ? rollCount * 1.5 : 0,
+              duration: const Duration(milliseconds: 550),
+              curve: Curves.easeOutCubic,
+              child: AnimatedScale(
+                scale: isRolling ? 1.12 : 1,
+                duration: const Duration(milliseconds: 180),
+                child: Container(
+                  width: 48,
+                  height: 48,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? const Color(0xFFD4AF37)
+                        : Colors.grey.shade700,
+                    borderRadius: BorderRadius.circular(10),
+                    boxShadow: active
+                        ? [
+                            BoxShadow(
+                              color: widget.color.withOpacity(0.35),
+                              blurRadius: 10,
+                            ),
+                          ]
+                        : [],
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFDF7),
+                      borderRadius: BorderRadius.circular(7),
+                    ),
+                    child: CustomPaint(
+                      painter: _DiceFacePainter(widget.value),
+                      child: const SizedBox.expand(),
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
+            const SizedBox(height: 5),
+            Text(
+              isRolling
+                  ? 'ROLLING'
+                  : active
+                      ? 'YOUR TURN'
+                      : 'WAIT',
+              maxLines: 1,
+              style: TextStyle(
+                color: active ? widget.color : Colors.white38,
+                fontSize: 8,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }
@@ -117,8 +145,7 @@ class _DiceFacePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF182235);
+    final paint = Paint()..color = const Color(0xFF182235);
 
     final x1 = size.width * 0.25;
     final x2 = size.width * 0.50;

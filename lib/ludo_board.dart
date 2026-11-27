@@ -2,41 +2,185 @@
 import 'package:flutter/material.dart';
 import 'ludo_game.dart';
 
-class LudoBoard extends StatelessWidget {
-  final LudoGame? game;
+class LudoBoard extends StatefulWidget {
+  final LudoGame game;
+  final void Function(int tokenIndex) onTokenTap;
 
-  const LudoBoard({super.key, this.game});
+  const LudoBoard({
+    super.key,
+    required this.game,
+    required this.onTokenTap,
+  });
+
+  @override
+  State<LudoBoard> createState() => _LudoBoardState();
+}
+
+class _LudoBoardState extends State<LudoBoard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController controller;
+
+  Animation<double>? movement;
+
+  int? movingPlayer;
+  int? movingToken;
+
+  @override
+  void initState() {
+    super.initState();
+
+    controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+
+    controller.addListener(() {
+      if (mounted) setState(() {});
+    });
+
+    controller.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        setState(() {
+          movingPlayer = null;
+          movingToken = null;
+          movement = null;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  void handleTokenTap(Offset position, double boardSize) {
+    if (controller.isAnimating ||
+        !widget.game.hasRolled ||
+        widget.game.gameFinished) {
+      return;
+    }
+
+    final playerIndex = widget.game.currentPlayerIndex;
+    final player = widget.game.currentPlayer;
+    final legal = widget.game.legalTokenIndices;
+    final cell = boardSize / 15;
+
+    final painter = _LudoBoardPainter(widget.game);
+
+    int? selectedToken;
+    double nearestDistance = cell * 0.65;
+
+    for (final index in legal) {
+      final token = player.tokens[index];
+
+      final center = painter.tokenPosition(
+        playerIndex,
+        index,
+        token.progress.toDouble(),
+        cell,
+      );
+
+      final distance = (position - center).distance;
+
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        selectedToken = index;
+      }
+    }
+
+    if (selectedToken == null) return;
+
+    final oldProgress = player.tokens[selectedToken].progress;
+
+    widget.onTokenTap(selectedToken);
+
+    final newProgress = player.tokens[selectedToken].progress;
+
+    if (newProgress == oldProgress) return;
+
+    final steps = oldProgress == -1
+        ? 1
+        : (newProgress - oldProgress).abs();
+
+    setState(() {
+      movingPlayer = playerIndex;
+      movingToken = selectedToken;
+
+      controller.duration = Duration(
+        milliseconds: (steps * 145).clamp(250, 1100),
+      );
+
+      movement = Tween<double>(
+        begin: oldProgress.toDouble(),
+        end: newProgress.toDouble(),
+      ).animate(
+        CurvedAnimation(
+          parent: controller,
+          curve: Curves.easeInOut,
+        ),
+      );
+    });
+
+    controller.forward(from: 0);
+  }
 
   @override
   Widget build(BuildContext context) {
     return AspectRatio(
       aspectRatio: 1,
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFFD4AF37),
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black54,
-              blurRadius: 14,
-              offset: Offset(0, 5),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final size = constraints.maxWidth;
+
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (details) {
+              handleTokenTap(details.localPosition, size);
+            },
+            child: Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFD4AF37),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black54,
+                    blurRadius: 14,
+                    offset: Offset(0, 5),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(3),
+              child: CustomPaint(
+                painter: _LudoBoardPainter(
+                  widget.game,
+                  movingPlayer: movingPlayer,
+                  movingToken: movingToken,
+                  animatedProgress: movement?.value,
+                ),
+                child: const SizedBox.expand(),
+              ),
             ),
-          ],
-        ),
-        padding: const EdgeInsets.all(3),
-        child: CustomPaint(
-          painter: _LudoBoardPainter(game),
-          child: const SizedBox.expand(),
-        ),
+          );
+        },
       ),
     );
   }
 }
 
 class _LudoBoardPainter extends CustomPainter {
-  final LudoGame? game;
+  final LudoGame game;
+  final int? movingPlayer;
+  final int? movingToken;
+  final double? animatedProgress;
 
-  _LudoBoardPainter(this.game);
+  _LudoBoardPainter(
+    this.game, {
+    this.movingPlayer,
+    this.movingToken,
+    this.animatedProgress,
+  });
 
   static const route = <List<int>>[
     [6,1],[6,2],[6,3],[6,4],[6,5],
@@ -126,7 +270,7 @@ class _LudoBoardPainter extends CustomPainter {
       Paint()..color = const Color(0xFFFFFDF7),
     );
 
-    final positions = [
+    const positions = [
       [2, 2], [4, 2], [2, 4], [4, 4],
     ];
 
@@ -172,12 +316,12 @@ class _LudoBoardPainter extends CustomPainter {
   Offset tokenPosition(
     int playerIndex,
     int tokenIndex,
-    int progress,
+    double progress,
     double cell,
   ) {
     final base = bases[playerIndex];
 
-    if (progress == -1) {
+    if (progress < 0) {
       const positions = [
         [2, 2], [4, 2], [2, 4], [4, 4],
       ];
@@ -188,7 +332,7 @@ class _LudoBoardPainter extends CustomPainter {
       );
     }
 
-    if (progress == 56) {
+    if (progress >= 56) {
       const shifts = [
         Offset(-0.25, -0.25),
         Offset(0.25, -0.25),
@@ -202,42 +346,78 @@ class _LudoBoardPainter extends CustomPainter {
       );
     }
 
-    if (progress >= 51) {
-      final step = progress - 51;
+    if (progress <= 50) {
+      final lower = progress.floor();
+      final upper = (lower + 1).clamp(0, 50);
+      final fraction = progress - lower;
 
-      final lanes = [
-        [7, 1 + step],
-        [1 + step, 7],
-        [7, 13 - step],
-        [13 - step, 7],
-      ];
+      final first = route[
+          (offsets[playerIndex] + lower) % 52];
+      final second = route[
+          (offsets[playerIndex] + upper) % 52];
 
       return Offset(
-        (lanes[playerIndex][1] + 0.5) * cell,
-        (lanes[playerIndex][0] + 0.5) * cell,
+        (first[1] + 0.5 +
+                (second[1] - first[1]) * fraction) *
+            cell,
+        (first[0] + 0.5 +
+                (second[0] - first[0]) * fraction) *
+            cell,
       );
     }
 
-    final global = (offsets[playerIndex] + progress) % 52;
-    final point = route[global];
+    final laneProgress = progress - 51;
+    final lower = laneProgress.floor().clamp(0, 5);
+    final upper = (lower + 1).clamp(0, 5);
+    final fraction = laneProgress - lower;
+
+    final lanes = [
+      [7, 1 + lower],
+      [1 + lower, 7],
+      [7, 13 - lower],
+      [13 - lower, 7],
+    ];
+
+    final nextLanes = [
+      [7, 1 + upper],
+      [1 + upper, 7],
+      [7, 13 - upper],
+      [13 - upper, 7],
+    ];
 
     return Offset(
-      (point[1] + 0.5) * cell,
-      (point[0] + 0.5) * cell,
+      (lanes[playerIndex][1] +
+              (nextLanes[playerIndex][1] -
+                      lanes[playerIndex][1]) *
+                  fraction +
+              0.5) *
+          cell,
+      (lanes[playerIndex][0] +
+              (nextLanes[playerIndex][0] -
+                      lanes[playerIndex][0]) *
+                  fraction +
+              0.5) *
+          cell,
     );
   }
 
   void drawTokens(Canvas canvas, double cell) {
-    if (game == null) return;
-
-    for (var p = 0; p < game!.players.length; p++) {
-      final player = game!.players[p];
+    for (var p = 0; p < game.players.length; p++) {
+      final player = game.players[p];
 
       for (var t = 0; t < player.tokens.length; t++) {
+        var progress = player.tokens[t].progress.toDouble();
+
+        if (p == movingPlayer &&
+            t == movingToken &&
+            animatedProgress != null) {
+          progress = animatedProgress!;
+        }
+
         final position = tokenPosition(
           p,
           t,
-          player.tokens[t].progress,
+          progress,
           cell,
         );
 

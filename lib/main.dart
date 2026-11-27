@@ -33,11 +33,7 @@ class HomeScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.casino,
-              size: 85,
-              color: Color(0xFFD4AF37),
-            ),
+            const Icon(Icons.casino, size: 85, color: Color(0xFFD4AF37)),
             const SizedBox(height: 20),
             const Text(
               'LUDO MASTER',
@@ -100,23 +96,44 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   final LudoGame game = LudoGame();
 
-  String message = 'Roll the dice to start';
+  final Map<int, int> diceValues = {
+    0: 1,
+    1: 1,
+    2: 1,
+    3: 1,
+  };
 
-  int rollDice() {
+  String message = 'RED: Roll your dice';
+
+  static const playerColors = [
+    Color(0xFFE53935),
+    Color(0xFF1976D2),
+    Color(0xFFFFD600),
+    Color(0xFF43A047),
+  ];
+
+  int rollDiceForPlayer(int playerIndex) {
+    if (playerIndex != game.currentPlayerIndex ||
+        game.hasRolled ||
+        game.gameFinished) {
+      return diceValues[playerIndex]!;
+    }
+
     final result = game.rollDice();
+    diceValues[playerIndex] = result;
+
+    final playerName =
+        game.currentPlayer.color.name.toUpperCase();
 
     if (game.legalTokenIndices.isEmpty) {
-      final playerName = game.currentPlayer.color.name.toUpperCase();
-
       game.diceValue = null;
       game.hasRolled = false;
       game.currentPlayerIndex =
           (game.currentPlayerIndex + 1) % game.players.length;
 
-      message = '$playerName rolled $result. No legal move!';
+      message = '$playerName rolled $result. No move available!';
     } else {
-      message =
-          '${game.currentPlayer.color.name.toUpperCase()} rolled $result';
+      message = '$playerName rolled $result. Tap a highlighted token!';
     }
 
     setState(() {});
@@ -136,8 +153,12 @@ class _GameScreenState extends State<GameScreen> {
         message = '$playerName WINS!';
       } else if (captured) {
         message = '$playerName captured an opponent!';
+      } else if (game.diceValue == null &&
+          game.currentPlayer.color.name.toUpperCase() == playerName) {
+        message = '$playerName gets another turn!';
       } else {
-        message = '$playerName moved token ${tokenIndex + 1}';
+        message =
+            '${game.currentPlayer.color.name.toUpperCase()} turn';
       }
     });
   }
@@ -145,13 +166,16 @@ class _GameScreenState extends State<GameScreen> {
   void resetGame() {
     setState(() {
       game.reset();
-      message = 'New game started. Roll the dice!';
+      for (var i = 0; i < 4; i++) {
+        diceValues[i] = 1;
+      }
+      message = 'RED: Roll your dice';
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final legalMoves = game.legalTokenIndices;
+    final current = game.currentPlayerIndex;
 
     return Scaffold(
       backgroundColor: const Color(0xFF080D18),
@@ -175,12 +199,11 @@ class _GameScreenState extends State<GameScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 10),
-
+            const SizedBox(height: 8),
             Text(
               game.gameFinished
                   ? 'GAME FINISHED'
-                  : 'CURRENT PLAYER: ${game.currentPlayer.color.name.toUpperCase()}',
+                  : '${game.currentPlayer.color.name.toUpperCase()} PLAYER TURN',
               style: const TextStyle(
                 color: Color(0xFFD4AF37),
                 fontSize: 17,
@@ -188,59 +211,52 @@ class _GameScreenState extends State<GameScreen> {
                 letterSpacing: 1,
               ),
             ),
-
             const SizedBox(height: 5),
-
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 13,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                ),
               ),
             ),
-
             Expanded(
               child: Center(
                 child: Padding(
-                  padding: const EdgeInsets.all(10),
-                  child: LudoBoard(game: game),
+                  padding: const EdgeInsets.all(8),
+                  child: LudoBoard(
+                    game: game,
+                    onTokenTap: moveToken,
+                  ),
                 ),
               ),
             ),
-
-            if (!game.gameFinished && game.hasRolled) ...[
-              const Text(
-                'SELECT A TOKEN TO MOVE',
-                style: TextStyle(
-                  color: Color(0xFFD4AF37),
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1,
+            Container(
+              padding: const EdgeInsets.fromLTRB(5, 10, 5, 12),
+              decoration: const BoxDecoration(
+                color: Color(0xFF111B2D),
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(18),
                 ),
               ),
-              const SizedBox(height: 8),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 10,
-                children: legalMoves.map((index) {
-                  return ElevatedButton(
-                    onPressed: () => moveToken(index),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFD4AF37),
-                      foregroundColor: const Color(0xFF080D18),
+              child: Row(
+                children: List.generate(4, (index) {
+                  return Expanded(
+                    child: DiceWidget(
+                      key: ValueKey('player_dice_$index'),
+                      playerName: game.players[index].color.name,
+                      color: playerColors[index],
+                      value: diceValues[index]!,
+                      enabled: current == index &&
+                          !game.hasRolled &&
+                          !game.gameFinished,
+                      onRoll: () => rollDiceForPlayer(index),
                     ),
-                    child: Text('TOKEN ${index + 1}'),
                   );
-                }).toList(),
-              ),
-              const SizedBox(height: 10),
-            ],
-
-            Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: DiceWidget(
-                onRoll: rollDice,
-                enabled: !game.hasRolled && !game.gameFinished,
+                }),
               ),
             ),
           ],

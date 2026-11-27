@@ -1,27 +1,30 @@
 
-import 'dart:math';
 import 'package:flutter/material.dart';
 
 class DiceWidget extends StatefulWidget {
-  const DiceWidget({super.key});
+  final int Function() onRoll;
+  final bool enabled;
+
+  const DiceWidget({
+    super.key,
+    required this.onRoll,
+    this.enabled = true,
+  });
 
   @override
   State<DiceWidget> createState() => _DiceWidgetState();
 }
 
 class _DiceWidgetState extends State<DiceWidget> {
-  final Random random = Random();
-
   int diceNumber = 1;
   int rollCount = 0;
   bool isRolling = false;
 
   Future<void> rollDice() async {
-    if (isRolling) return;
+    if (isRolling || !widget.enabled) return;
 
     setState(() {
       isRolling = true;
-      diceNumber = random.nextInt(6) + 1;
       rollCount++;
     });
 
@@ -29,7 +32,10 @@ class _DiceWidgetState extends State<DiceWidget> {
 
     if (!mounted) return;
 
+    final result = widget.onRoll();
+
     setState(() {
+      diceNumber = result;
       isRolling = false;
     });
   }
@@ -47,23 +53,17 @@ class _DiceWidgetState extends State<DiceWidget> {
             scale: isRolling ? 1.12 : 1.0,
             duration: const Duration(milliseconds: 250),
             child: Container(
-              width: 104,
-              height: 104,
+              width: 96,
+              height: 96,
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
                 color: const Color(0xFFD4AF37),
                 borderRadius: BorderRadius.circular(22),
                 boxShadow: [
                   BoxShadow(
-                    color: const Color(0xFFD4AF37)
-                        .withOpacity(0.35),
+                    color: const Color(0xFFD4AF37).withOpacity(0.35),
                     blurRadius: 22,
                     spreadRadius: 2,
-                  ),
-                  const BoxShadow(
-                    color: Colors.black54,
-                    blurRadius: 12,
-                    offset: Offset(0, 7),
                   ),
                 ],
               ),
@@ -80,14 +80,13 @@ class _DiceWidgetState extends State<DiceWidget> {
             ),
           ),
         ),
-
-        const SizedBox(height: 22),
-
+        const SizedBox(height: 16),
         SizedBox(
           width: 180,
           height: 48,
           child: ElevatedButton.icon(
-            onPressed: isRolling ? null : rollDice,
+            onPressed:
+                (isRolling || !widget.enabled) ? null : rollDice,
             icon: const Icon(Icons.casino),
             label: Text(
               isRolling ? 'ROLLING...' : 'ROLL DICE',
@@ -118,9 +117,8 @@ class _DiceFacePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final dotPaint = Paint()
-      ..color = const Color(0xFF182235)
-      ..style = PaintingStyle.fill;
+    final paint = Paint()
+      ..color = const Color(0xFF182235);
 
     final x1 = size.width * 0.25;
     final x2 = size.width * 0.50;
@@ -136,22 +134,22 @@ class _DiceFacePainter extends CustomPainter {
       3: [Offset(x1, y1), Offset(x2, y2), Offset(x3, y3)],
       4: [
         Offset(x1, y1), Offset(x3, y1),
-        Offset(x1, y3), Offset(x3, y3)
+        Offset(x1, y3), Offset(x3, y3),
       ],
       5: [
         Offset(x1, y1), Offset(x3, y1),
         Offset(x2, y2),
-        Offset(x1, y3), Offset(x3, y3)
+        Offset(x1, y3), Offset(x3, y3),
       ],
       6: [
         Offset(x1, y1), Offset(x3, y1),
         Offset(x1, y2), Offset(x3, y2),
-        Offset(x1, y3), Offset(x3, y3)
+        Offset(x1, y3), Offset(x3, y3),
       ],
     };
 
     for (final point in positions[number]!) {
-      canvas.drawCircle(point, size.width * 0.065, dotPaint);
+      canvas.drawCircle(point, size.width * 0.065, paint);
     }
   }
 

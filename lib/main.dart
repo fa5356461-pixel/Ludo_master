@@ -37,13 +37,14 @@ const safeCells = {0, 8, 13, 21, 26, 34, 39, 47};
 class Token {
   int progress;
   Token({this.progress = -1});
-  bool get inBase => progress == -1;
+
   bool get finished => progress == 56;
 }
 
 class Player {
   final int id;
   final List<Token> tokens = List.generate(4, (_) => Token());
+
   Player(this.id);
 }
 
@@ -51,10 +52,13 @@ class LudoGame {
   final players = List.generate(4, (i) => Player(i));
   final Random random = Random();
 
+  final List<int> diceValues = [1, 1, 1, 1];
+
   int turn = 0;
   int? dice;
   bool rolled = false;
   bool finished = false;
+  bool lastRollSkipped = false;
   int sixCount = 0;
   int? winner;
 
@@ -64,45 +68,54 @@ class LudoGame {
     if (!rolled || dice == null || finished) return [];
 
     final result = <int>[];
+
     for (int i = 0; i < 4; i++) {
       final p = current.tokens[i].progress;
-      if (p == -1 && dice == 6) result.add(i);
-      if (p >= 0 && p < 56 && p + dice! <= 56) {
+
+      if (p == -1 && dice == 6) {
+        result.add(i);
+      } else if (p >= 0 && p < 56 && p + dice! <= 56) {
         result.add(i);
       }
     }
+
     return result;
   }
 
   int roll() {
     if (rolled || finished) return dice ?? 1;
 
-    dice = random.nextInt(6) + 1;
-    rolled = true;
+    lastRollSkipped = false;
 
-    if (dice == 6) {
+    final value = random.nextInt(6) + 1;
+    diceValues[turn] = value;
+
+    if (value == 6) {
       sixCount++;
+
       if (sixCount == 3) {
+        lastRollSkipped = true;
         dice = null;
         rolled = false;
-        sixCount = 0;
         nextTurn();
-        return 6;
+        return value;
       }
     } else {
       sixCount = 0;
     }
 
-    return dice!;
+    dice = value;
+    rolled = true;
+    return value;
   }
 
   bool move(int index) {
     if (!legalMoves.contains(index)) return false;
 
-    final token = current.tokens[index];
-    final oldProgress = token.progress;
+    final player = current;
+    final token = player.tokens[index];
 
-    if (oldProgress == -1) {
+    if (token.progress == -1) {
       token.progress = 0;
     } else {
       token.progress += dice!;
@@ -111,7 +124,7 @@ class LudoGame {
     final captured = capture(token);
     final reachedHome = token.progress == 56;
 
-    if (current.tokens.every((t) => t.finished)) {
+    if (player.tokens.every((t) => t.finished)) {
       finished = true;
       winner = turn;
     }
@@ -121,7 +134,9 @@ class LudoGame {
     dice = null;
     rolled = false;
 
-    if (!finished && !extraTurn) nextTurn();
+    if (!finished && !extraTurn) {
+      nextTurn();
+    }
 
     return captured;
   }
@@ -130,6 +145,7 @@ class LudoGame {
     if (token.progress < 0 || token.progress > 50) return false;
 
     final cell = (offsets[turn] + token.progress) % 52;
+
     if (safeCells.contains(cell)) return false;
 
     bool captured = false;
@@ -141,13 +157,21 @@ class LudoGame {
         if (enemy.progress < 0 || enemy.progress > 50) continue;
 
         final enemyCell = (offsets[p] + enemy.progress) % 52;
+
         if (enemyCell == cell) {
           enemy.progress = -1;
           captured = true;
         }
       }
     }
+
     return captured;
+  }
+
+  void passTurn() {
+    dice = null;
+    rolled = false;
+    nextTurn();
   }
 
   void nextTurn() {
@@ -156,15 +180,19 @@ class LudoGame {
   }
 
   void reset() {
-    for (final p in players) {
-      for (final t in p.tokens) {
-        t.progress = -1;
+    for (final player in players) {
+      for (final token in player.tokens) {
+        token.progress = -1;
       }
     }
+
+    diceValues.fillRange(0, 4, 1);
+
     turn = 0;
     dice = null;
     rolled = false;
     finished = false;
+    lastRollSkipped = false;
     sixCount = 0;
     winner = null;
   }
@@ -280,13 +308,11 @@ class _GamePageState extends State<GamePage> {
     final value = game.roll();
 
     setState(() {
-      if (game.sixCount == 0 && value == 6 && !game.rolled) {
+      if (game.lastRollSkipped) {
         message = '${playerNames[player]} rolled three sixes. Turn skipped.';
       } else if (game.legalMoves.isEmpty) {
         message = '${playerNames[player]} rolled $value. No legal move.';
-        game.dice = null;
-        game.rolled = false;
-        game.nextTurn();
+        game.passTurn();
         message += ' ${playerNames[game.turn]} plays.';
       } else {
         message = '${playerNames[player]} rolled $value. Tap a token.';
@@ -407,153 +433,319 @@ class LudoBoard extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final size = constraints.maxWidth;
+        final size = min(constraints.maxWidth, constraints.maxHeight);
 
-        return Container(
-          decoration: BoxDecoration(
-            color: gold,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black54,
-                blurRadius: 15,
-                offset: Offset(0, 5),
-              ),
-            ],
-          ),
-          padding: const EdgeInsets.all(3),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: (details) {
-                    final cell = size / 15;
-                    final point = details.localPosition;
-
-                    double nearest = cell * 0.55;
-                    int? selectedPlayer;
-                    int? selectedToken;
-
-                    for (int p = 0; p < 4; p++) {
-                      for (final t in game.legalMoves) {
-                        final token = game.players[p].tokens[t];
-                        if (p != game.turn) continue;
-
-                        final center = tokenPosition(
-                          p,
-                          t,
-                          token.progress.toDouble(),
-                          cell,
-                        );
-
-                        final distance = (point - center).distance;
-                        if (distance < nearest) {
-                          nearest = distance;
-                          selectedPlayer = p;
-                          selectedToken = t;
-                        }
-                      }
-                    }
-
-                    if (selectedPlayer != null && selectedToken != null) {
-                      onTokenTap(selectedPlayer, selectedToken);
-                    }
-                  },
-                  child: CustomPaint(
-                    painter: BoardPainter(game),
-                    child: const SizedBox.expand(),
-                  ),
+        return SizedBox(
+          width: size,
+          height: size,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: gold, width: 3),
+              borderRadius: BorderRadius.circular(10),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black54,
+                  blurRadius: 15,
+                  offset: Offset(0, 5),
                 ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(7),
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTapDown: (details) {
+                        final cell = size / 15;
+                        final point = details.localPosition;
+
+                        double nearest = cell * 0.48;
+                        int? selected;
+
+                        for (final t in game.legalMoves) {
+                          final token = game.players[game.turn].tokens[t];
+
+                          final center = tokenPosition(
+                            game.turn,
+                            t,
+                            token.progress.toDouble(),
+                            cell,
+                          );
+
+                          final distance = (point - center).distance;
+
+                          if (distance < nearest) {
+                            nearest = distance;
+                            selected = t;
+                          }
+                        }
+
+                        if (selected != null) {
+                          onTokenTap(game.turn, selected);
+                        }
+                      },
+                      child: CustomPaint(
+                        painter: BoardPainter(game),
+                        child: const SizedBox.expand(),
+                      ),
+                    ),
+                  ),
+
+                  _positionDice(0, size),
+                  _positionDice(1, size),
+                  _positionDice(2, size),
+                  _positionDice(3, size),
+                ],
               ),
-              _dice(0, Alignment.center, size),
-              _dice(1, Alignment.center, size),
-              _dice(2, Alignment.center, size),
-              _dice(3, Alignment.center, size),
-            ],
+            ),
           ),
         );
       },
     );
   }
 
-  Widget _dice(int player, Alignment ignored, double size) {
-    final isActive = game.turn == player;
-    final canRoll = isActive && !game.rolled && !game.finished;
-    final value = isActive && game.dice != null ? game.dice! : null;
+  Widget _positionDice(int player, double size) {
+    final positions = [
+      const [0.035, 0.035, -1.0, -1.0],
+      const [-1.0, 0.035, 0.035, -1.0],
+      const [-1.0, -1.0, 0.035, 0.035],
+      const [0.035, -1.0, -1.0, 0.035],
+    ];
+
+    final p = positions[player];
+    final active = game.turn == player && !game.finished;
 
     return Positioned(
-      left: player == 0 || player == 3 ? size * 0.265 : null,
-      right: player == 1 || player == 2 ? size * 0.265 : null,
-      top: player == 0 || player == 1 ? size * 0.265 : null,
-      bottom: player == 2 || player == 3 ? size * 0.265 : null,
-      child: GestureDetector(
-        onTap: canRoll ? onRoll : null,
-        child: Container(
-          width: size * 0.19,
-          height: size * 0.19,
-          decoration: BoxDecoration(
-            color: const Color(0xFF101827).withOpacity(0.94),
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(
-              color: isActive ? gold : playerColors[player],
-              width: isActive ? 2 : 1,
-            ),
-            boxShadow: const [
-              BoxShadow(color: Colors.black45, blurRadius: 5),
-            ],
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(
-                playerNames[player],
-                style: TextStyle(
-                  color: playerColors[player],
-                  fontSize: size * 0.022,
-                  fontWeight: FontWeight.bold,
+      left: p[0] >= 0 ? size * p[0] : null,
+      top: p[1] >= 0 ? size * p[1] : null,
+      right: p[2] >= 0 ? size * p[2] : null,
+      bottom: p[3] >= 0 ? size * p[3] : null,
+      child: DiceWidget(
+        player: player,
+        value: game.diceValues[player],
+        enabled: active && !game.rolled,
+        onRoll: onRoll,
+        size: size * 0.145,
+      ),
+    );
+  }
+}
+
+class DiceWidget extends StatefulWidget {
+  final int player;
+  final int value;
+  final bool enabled;
+  final VoidCallback onRoll;
+  final double size;
+
+  const DiceWidget({
+    super.key,
+    required this.player,
+    required this.value,
+    required this.enabled,
+    required this.onRoll,
+    required this.size,
+  });
+
+  @override
+  State<DiceWidget> createState() => _DiceWidgetState();
+}
+
+class _DiceWidgetState extends State<DiceWidget>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController controller;
+  bool rolling = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 850),
+    );
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> handleRoll() async {
+    if (!widget.enabled || rolling) return;
+
+    setState(() => rolling = true);
+
+    await controller.forward(from: 0);
+
+    if (!mounted) return;
+
+    widget.onRoll();
+
+    if (mounted) {
+      setState(() => rolling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: handleRoll,
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, child) {
+          final face = rolling
+              ? 1 + ((controller.value * 18).floor() % 6)
+              : widget.value;
+
+          final angle = rolling
+              ? sin(controller.value * pi * 12) *
+                  (1 - controller.value) *
+                  0.18
+              : 0.0;
+
+          final scale = rolling
+              ? 1 + sin(controller.value * pi) * 0.08
+              : 1.0;
+
+          return Transform.rotate(
+            angle: angle,
+            child: Transform.scale(
+              scale: scale,
+              child: Container(
+                width: widget.size,
+                height: widget.size,
+                padding: EdgeInsets.all(widget.size * 0.08),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF101827),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: widget.enabled ? gold : playerColors[widget.player],
+                    width: widget.enabled ? 2.5 : 1.5,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.45),
+                      blurRadius: 6,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    FittedBox(
+                      child: Text(
+                        playerNames[widget.player],
+                        style: TextStyle(
+                          color: playerColors[widget.player],
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Center(
+                        child: DiceFace(value: face),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 3),
-              Container(
-                width: size * 0.09,
-                height: size * 0.09,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(7),
-                ),
-                child: Center(
-                  child: Text(
-                    value?.toString() ?? '⚄',
-                    style: const TextStyle(
-                      color: Colors.black,
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class DiceFace extends StatelessWidget {
+  final int value;
+
+  const DiceFace({super.key, required this.value});
+
+  static const spots = <int, List<Alignment>>{
+    1: [Alignment.center],
+    2: [Alignment(-0.55, -0.55), Alignment(0.55, 0.55)],
+    3: [
+      Alignment(-0.55, -0.55),
+      Alignment.center,
+      Alignment(0.55, 0.55),
+    ],
+    4: [
+      Alignment(-0.55, -0.55),
+      Alignment(0.55, -0.55),
+      Alignment(-0.55, 0.55),
+      Alignment(0.55, 0.55),
+    ],
+    5: [
+      Alignment(-0.55, -0.55),
+      Alignment(0.55, -0.55),
+      Alignment.center,
+      Alignment(-0.55, 0.55),
+      Alignment(0.55, 0.55),
+    ],
+    6: [
+      Alignment(-0.55, -0.55),
+      Alignment(0.55, -0.55),
+      Alignment(-0.55, 0),
+      Alignment(0.55, 0),
+      Alignment(-0.55, 0.55),
+      Alignment(0.55, 0.55),
+    ],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final dots = spots[value.clamp(1, 6)]!;
+
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFFEF8),
+          borderRadius: BorderRadius.circular(7),
+          boxShadow: const [
+            BoxShadow(color: Colors.black26, blurRadius: 2),
+          ],
+        ),
+        child: Stack(
+          children: [
+            for (final spot in dots)
+              Align(
+                alignment: spot,
+                child: FractionallySizedBox(
+                  widthFactor: 0.19,
+                  heightFactor: 0.19,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111827),
+                      borderRadius: BorderRadius.circular(50),
                     ),
                   ),
                 ),
               ),
-              const SizedBox(height: 2),
-              Text(
-                canRoll ? 'ROLL' : isActive && game.rolled ? 'MOVE' : 'WAIT',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 8,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
       ),
     );
   }
 }
 
-Offset tokenPosition(int player, int token, double progress, double cell) {
+Offset tokenPosition(
+  int player,
+  int token,
+  double progress,
+  double cell,
+) {
   const bases = [
     [0, 0], [0, 9], [9, 9], [9, 0],
   ];
+
   const homes = [
     [2, 2], [4, 2], [2, 4], [4, 4],
   ];
@@ -572,6 +764,7 @@ Offset tokenPosition(int player, int token, double progress, double cell) {
       Offset(-0.22, 0.22),
       Offset(0.22, 0.22),
     ];
+
     return Offset(
       (7.5 + shifts[token].dx) * cell,
       (7.5 + shifts[token].dy) * cell,
@@ -582,6 +775,7 @@ Offset tokenPosition(int player, int token, double progress, double cell) {
     final index = (offsets[player] + progress.floor()) % 52;
     final next = (index + 1) % 52;
     final fraction = progress - progress.floor();
+
     return Offset(
       (route[index][1] + 0.5 +
               (route[next][1] - route[index][1]) * fraction) *
@@ -592,12 +786,13 @@ Offset tokenPosition(int player, int token, double progress, double cell) {
     );
   }
 
-  final lane = (progress - 51).clamp(0, 5);
+  final lane = (progress - 51).clamp(0, 5).toDouble();
+
   final lanes = [
-    [7, 1 + lane],
-    [1 + lane, 7],
-    [7, 13 - lane],
-    [13 - lane, 7],
+    [7.0, 1.0 + lane],
+    [1.0 + lane, 7.0],
+    [7.0, 13.0 - lane],
+    [13.0 - lane, 7.0],
   ];
 
   return Offset(
@@ -608,11 +803,20 @@ Offset tokenPosition(int player, int token, double progress, double cell) {
 
 class BoardPainter extends CustomPainter {
   final LudoGame game;
+
   BoardPainter(this.game);
 
-  void cell(Canvas canvas, double s, int r, int c, Color color) {
+  void cell(
+    Canvas canvas,
+    double s,
+    int r,
+    int c,
+    Color color,
+  ) {
     final rect = Rect.fromLTWH(c * s, r * s, s, s);
+
     canvas.drawRect(rect, Paint()..color = color);
+
     canvas.drawRect(
       rect,
       Paint()
@@ -622,7 +826,13 @@ class BoardPainter extends CustomPainter {
     );
   }
 
-  void home(Canvas canvas, double s, int row, int col, Color color) {
+  void home(
+    Canvas canvas,
+    double s,
+    int row,
+    int col,
+    Color color,
+  ) {
     canvas.drawRect(
       Rect.fromLTWH(col * s, row * s, 6 * s, 6 * s),
       Paint()..color = color,
@@ -630,19 +840,33 @@ class BoardPainter extends CustomPainter {
 
     canvas.drawRRect(
       RRect.fromRectAndRadius(
-        Rect.fromLTWH((col + s / s) * s, (row + 1) * s, 4 * s, 4 * s),
+        Rect.fromLTWH(
+          (col + 1) * s,
+          (row + 1) * s,
+          4 * s,
+          4 * s,
+        ),
         Radius.circular(s * 0.2),
       ),
       Paint()..color = const Color(0xFFFFFDF7),
     );
 
-    const positions = [[2,2],[4,2],[2,4],[4,4]];
+    const positions = [
+      [2,2],[4,2],[2,4],[4,4],
+    ];
+
     for (final p in positions) {
       final center = Offset(
         (col + p[0] + 0.5) * s,
         (row + p[1] + 0.5) * s,
       );
-      canvas.drawCircle(center, s * 0.37, Paint()..color = color);
+
+      canvas.drawCircle(
+        center,
+        s * 0.37,
+        Paint()..color = color,
+      );
+
       canvas.drawCircle(
         center,
         s * 0.25,
@@ -684,9 +908,9 @@ class BoardPainter extends CustomPainter {
       cell(canvas, s, start[0], start[1], playerColors[p]);
     }
 
-    // Safe stars: these match the game capture-protection cells.
     for (final index in [8, 21, 34, 47]) {
       final point = route[index];
+
       final painter = TextPainter(
         text: TextSpan(
           text: '★',
@@ -709,6 +933,7 @@ class BoardPainter extends CustomPainter {
     }
 
     final center = Offset(7.5 * s, 7.5 * s);
+
     final triangles = [
       [Offset(6*s,6*s), Offset(9*s,6*s), playerColors[0]],
       [Offset(9*s,6*s), Offset(9*s,9*s), playerColors[1]],
@@ -719,29 +944,42 @@ class BoardPainter extends CustomPainter {
     for (final item in triangles) {
       final a = item[0] as Offset;
       final b = item[1] as Offset;
+
       final path = Path()
         ..moveTo(a.dx, a.dy)
         ..lineTo(b.dx, b.dy)
         ..lineTo(center.dx, center.dy)
         ..close();
-      canvas.drawPath(path, Paint()..color = item[2] as Color);
+
+      canvas.drawPath(
+        path,
+        Paint()..color = item[2] as Color,
+      );
     }
 
     for (int p = 0; p < 4; p++) {
       for (int t = 0; t < 4; t++) {
         final token = game.players[p].tokens[t];
-        final pos = tokenPosition(p, t, token.progress.toDouble(), s);
+
+        final pos = tokenPosition(
+          p,
+          t,
+          token.progress.toDouble(),
+          s,
+        );
 
         canvas.drawCircle(
           pos + Offset(0, s * 0.035),
           s * 0.34,
           Paint()..color = Colors.black54,
         );
+
         canvas.drawCircle(
           pos,
           s * 0.29,
           Paint()..color = playerColors[p],
         );
+
         canvas.drawCircle(
           pos,
           s * 0.20,
@@ -750,6 +988,7 @@ class BoardPainter extends CustomPainter {
             ..style = PaintingStyle.stroke
             ..strokeWidth = 1.4,
         );
+
         canvas.drawCircle(
           pos,
           s * 0.08,

@@ -417,7 +417,7 @@ class _GamePageState extends State<GamePage> {
   }
 }
 
-class LudoBoard extends StatelessWidget {
+class LudoBoard extends StatefulWidget {
   final LudoGame game;
   final VoidCallback onRoll;
   final void Function(int player, int token) onTokenTap;
@@ -430,10 +430,72 @@ class LudoBoard extends StatelessWidget {
   });
 
   @override
+  State<LudoBoard> createState() => _LudoBoardState();
+}
+
+class _LudoBoardState extends State<LudoBoard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController moveController;
+
+  int? movingPlayer;
+  int? movingToken;
+  double moveFrom = 0;
+  double moveTo = 0;
+
+  bool get isMoving => movingToken != null;
+
+  @override
+  void initState() {
+    super.initState();
+
+    moveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    );
+
+    moveController.addListener(() {
+      if (mounted) setState(() {});
+    });
+
+    moveController.addStatusListener((status) {
+      if (status == AnimationStatus.completed && mounted) {
+        setState(() {
+          movingPlayer = null;
+          movingToken = null;
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    moveController.dispose();
+    super.dispose();
+  }
+
+  void startMove(int player, int token, int from, int to) {
+    final steps = from == -1 ? 1 : (to - from).abs();
+
+    moveController.duration = Duration(
+      milliseconds: (steps * 145).clamp(250, 1100).toInt(),
+    );
+
+    setState(() {
+      movingPlayer = player;
+      movingToken = token;
+      moveFrom = from.toDouble();
+      moveTo = to.toDouble();
+    });
+
+    moveController.forward(from: 0);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final size = min(constraints.maxWidth, constraints.maxHeight);
+        final game = widget.game;
 
         return SizedBox(
           width: size,
@@ -458,17 +520,20 @@ class LudoBoard extends StatelessWidget {
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTapDown: (details) {
+                        if (isMoving) return;
+
                         final cell = size / 15;
                         final point = details.localPosition;
+                        final playerIndex = game.turn;
 
                         double nearest = cell * 0.48;
                         int? selected;
 
                         for (final t in game.legalMoves) {
-                          final token = game.players[game.turn].tokens[t];
+                          final token = game.players[playerIndex].tokens[t];
 
                           final center = tokenPosition(
-                            game.turn,
+                            playerIndex,
                             t,
                             token.progress.toDouble(),
                             cell,
@@ -482,12 +547,35 @@ class LudoBoard extends StatelessWidget {
                           }
                         }
 
-                        if (selected != null) {
-                          onTokenTap(game.turn, selected);
+                        if (selected == null) return;
+
+                        final oldProgress =
+                            game.players[playerIndex].tokens[selected].progress;
+
+                        widget.onTokenTap(playerIndex, selected);
+
+                        final newProgress =
+                            game.players[playerIndex].tokens[selected].progress;
+
+                        if (newProgress != oldProgress) {
+                          startMove(
+                            playerIndex,
+                            selected,
+                            oldProgress,
+                            newProgress,
+                          );
                         }
                       },
                       child: CustomPaint(
-                        painter: BoardPainter(game),
+                        painter: BoardPainter(
+                          game,
+                          movingPlayer: movingPlayer,
+                          movingToken: movingToken,
+                          moveFrom: moveFrom,
+                          moveTo: moveTo,
+                          moveT: Curves.easeInOut
+                              .transform(moveController.value),
+                        ),
                         child: const SizedBox.expand(),
                       ),
                     ),
@@ -507,6 +595,8 @@ class LudoBoard extends StatelessWidget {
   }
 
   Widget _positionDice(int player, double size) {
+    final game = widget.game;
+
     final positions = [
       const [0.035, 0.035, -1.0, -1.0],
       const [-1.0, 0.035, 0.035, -1.0],
@@ -525,8 +615,8 @@ class LudoBoard extends StatelessWidget {
       child: DiceWidget(
         player: player,
         value: game.diceValues[player],
-        enabled: active && !game.rolled,
-        onRoll: onRoll,
+        enabled: active && !game.rolled && !isMoving,
+        onRoll: widget.onRoll,
         size: size * 0.145,
       ),
     );
@@ -803,8 +893,20 @@ Offset tokenPosition(
 
 class BoardPainter extends CustomPainter {
   final LudoGame game;
+  final int? movingPlayer;
+  final int? movingToken;
+  final double moveFrom;
+  final double moveTo;
+  final double moveT;
 
-  BoardPainter(this.game);
+  BoardPainter(
+    this.game, {
+    this.movingPlayer,
+    this.movingToken,
+    this.moveFrom = 0,
+    this.moveTo = 0,
+    this.moveT = 0,
+  });
 
   void cell(
     Canvas canvas,
@@ -961,12 +1063,26 @@ class BoardPainter extends CustomPainter {
       for (int t = 0; t < 4; t++) {
         final token = game.players[p].tokens[t];
 
-        final pos = tokenPosition(
-          p,
-          t,
-          token.progress.toDouble(),
-          s,
-        );
+        Offset pos;
+
+        if (p == movingPlayer && t == movingToken) {
+          if (moveFrom < 0) {
+            pos = Offset.lerp(
+              tokenPosition(p, t, -1, s),
+              tokenPosition(p, t, 0, s),
+              moveT,
+            )!;
+          } else {
+            pos = tokenPosition(
+              p,
+              t,
+              moveFrom + (moveTo - moveFrom) * moveT,
+              s,
+            );
+          }
+        } else {
+          pos = tokenPosition(p, t, token.progress.toDouble(), s);
+        }
 
         canvas.drawCircle(
           pos + Offset(0, s * 0.035),
